@@ -1,0 +1,84 @@
+---
+# Creates local Linux accounts, deploys SSH public keys, optional passwordless sudo.
+#
+# User list: vars/managed_users.yml  (copy from vars/managed_users.example.yml)
+# Run: bash scripts/run_create_users_wsl.sh
+# Targeted tag runs:
+#   --tags user          only create/update accounts
+#   --tags ssh_key       only update authorized_keys + permissions
+#   --tags sudo          only update sudoers drop-ins
+#   --tags verify        only show getent passwd lines
+#   --check --diff       dry-run with change preview
+
+- name: Create users and SSH access on Amazon Linux hosts
+  hosts: linux
+  become: true
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/managed_users.yml"
+
+  pre_tasks:
+    - name: Assert ansible_host is set (see .env.example)
+      ansible.builtin.assert:
+        that:
+          - ansible_host is defined
+          - ansible_host | length > 0
+        fail_msg: >-
+          ansible_host is not set for {{ inventory_hostname }}.
+          Export EC2_HOST_* from .env and re-run bash scripts/render_inventory_from_env.sh.
+      tags: [always]
+
+    - name: Assert managed_users variable is populated
+      ansible.builtin.assert:
+        that:
+          - managed_users is defined
+          - managed_users | length > 0
+        fail_msg: >-
+          managed_users is empty.
+          Copy vars/managed_users.example.yml to vars/managed_users.yml and add at least one user.
+      tags: [always]
+
+  tasks:
+    # include_role with loop: each iteration applies the managed_user role
+    # for one entry from the managed_users list.  Tags on include_role flow
+    # into every task inside the role.
+    - name: "Apply managed_user role for {{ item.username }}"
+      ansible.builtin.include_role:
+        name: managed_user
+      vars:
+        mu_username:        "{{ item.username }}"
+        mu_shell:           "{{ item.shell          | default('/bin/bash') }}"
+        mu_groups:          "{{ item.groups         | default('wheel') }}"
+        mu_append_groups:   "{{ item.append_groups  | default(true) }}"
+        mu_sudo_nopasswd:   "{{ item.sudo_nopasswd  | default(false) }}"
+        mu_ssh_public_keys: "{{ item.ssh_public_keys | default([]) }}"
+        mu_exclusive_keys:  "{{ item.exclusive_keys | default(false) }}"
+      loop:         "{{ managed_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+      tags: [users, managed_user]
+
+- name: Validate — show passwd entries for all managed users
+  hosts: linux
+  become: true
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../vars/managed_users.yml"
+
+  tasks:
+    - name: "getent passwd for each managed user"
+      ansible.builtin.command: "getent passwd {{ item.username }}"
+      register:     _passwd_lines
+      changed_when: false
+      loop:         "{{ managed_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+      tags: [verify, users]
+
+    - name: Show passwd entries
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ _passwd_lines.results }}"
+      loop_control:
+        label: "{{ item.item.username }}"
+      tags: [verify, users]

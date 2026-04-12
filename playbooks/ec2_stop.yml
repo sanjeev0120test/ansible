@@ -1,0 +1,57 @@
+---
+# Stop running ansible-lab EC2 instances (EBS retained; no compute charge while stopped).
+#
+# SOURCE OF TRUTH — Project=ansible-lab in AWS_DEFAULT_REGION.
+# Env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+#
+# Run: bash scripts/run_ec2_stop.sh
+# Resume: bash scripts/run_ec2_start.sh
+
+- name: Stop ansible-lab EC2 instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region:      "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+    ec2_project_tag: "ansible-lab"
+
+  pre_tasks:
+    - name: Assert AWS_DEFAULT_REGION is set
+      ansible.builtin.assert:
+        that: aws_region | length > 0
+        fail_msg: "Set AWS_DEFAULT_REGION in .env (e.g. us-east-1 for US East N. Virginia)."
+      tags: [always]
+
+  tasks:
+    - name: Find running ansible-lab instances
+      amazon.aws.ec2_instance_info:
+        region:  "{{ aws_region }}"
+        filters:
+          "tag:Project":        "{{ ec2_project_tag }}"
+          instance-state-name:  running
+      register: _running
+      tags: [ec2]
+
+    - name: Show instances to be stopped
+      ansible.builtin.debug:
+        msg: "Stopping {{ _running.instances | length }} instance(s) in {{ aws_region }}"
+      tags: [ec2]
+
+    - name: Stop instances
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ _running.instances | map(attribute='instance_id') | list }}"
+        region:       "{{ aws_region }}"
+        state:        stopped
+        wait:         true
+      when: _running.instances | length > 0
+      tags: [ec2]
+
+    - name: Confirm stopped
+      ansible.builtin.debug:
+        msg:
+          - "{{ _running.instances | length }} instance(s) stopped."
+          - "Public IPs are released (will change on restart)."
+          - "Resume: bash scripts/run_ec2_start.sh"
+          - "Delete : bash scripts/run_ec2_terminate.sh"
+      tags: [ec2]

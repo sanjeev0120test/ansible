@@ -1,0 +1,161 @@
+================================================================================
+WSL-FIRST RUNBOOK (Cursor / VS Code on Windows) — Ansible & SSH to EC2
+================================================================================
+Architecture:
+  .env (EC2 IPs + PEM)
+    → render_inventory_from_env.sh
+    → inventory/hosts.autogen.yml
+    → ansible-playbook playbooks/site.yml   (or any individual playbook)
+    → EC2: managed Linux users, sudo, SSH keys, marker files, hardened sshd
+
+Nothing in the primary path requires PowerShell.
+Optional PowerShell fallback: scripts/deprecated-windows/Run-FromCursor.ps1
+
+--------------------------------------------------------------------------------
+A) Make Cursor open WSL every time (not PS C:\...)
+--------------------------------------------------------------------------------
+1. This repo includes .vscode/settings.json:
+     "terminal.integrated.defaultProfile.windows": "WSL"
+2. Reload: Command Palette → "Developer: Reload Window"
+3. New Terminal (+): prompt must show "user@HOST:/mnt/c/..." not "PS C:\..."
+
+If you still see PowerShell:
+  Terminal pane → dropdown (+) → "Select Default Profile" → WSL / Ubuntu
+  Open a NEW terminal after changing.
+
+--------------------------------------------------------------------------------
+B) One-time: WSL prerequisites (open-source / apt only)
+--------------------------------------------------------------------------------
+  cd /mnt/c/dev/ansible/ansible
+  bash scripts/install_dependencies.sh
+  # Installs ansible + python3-venv via apt if missing, .venv with boto3,
+  # and all collections in requirements.yml (posix, community.general, amazon.aws).
+  # Avoid: pip3 install --user on Ubuntu 24.04+ (PEP 668 / externally-managed-env).
+
+--------------------------------------------------------------------------------
+C) Every clone / machine: configure repo
+--------------------------------------------------------------------------------
+  cd /mnt/c/dev/ansible/ansible
+
+  cp -n .env.example .env
+  nano .env   # AWS_DEFAULT_REGION=us-east-1, keys, EC2_KEY_PAIR_NAME, EC2_INSTANCE_TYPE=t3.micro (AWS Free Tier lab standard), EC2_HOST_*, PEM path
+
+One-time: copy EC2 PEM key into WSL (adjust filename to match yours):
+
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  cp "/mnt/c/Users/Pratiksha Sahu/Downloads/key pair.pem" ~/.ssh/ec2-keypair.pem
+  chmod 600 ~/.ssh/ec2-keypair.pem
+
+Managed-user SSH keypair (if .keys/ is missing):
+
+  mkdir -p .keys
+  ssh-keygen -t ed25519 -f .keys/appoperator_ed25519 -N "" -C "ansible-managed"
+
+Re-install / upgrade collections + venv (if something is missing):
+
+  bash scripts/install_dependencies.sh
+
+If EC2 playbooks fail with UnauthorizedOperation / ec2:DescribeInstances:
+  Your IAM user has keys but no EC2 permissions. In AWS: IAM → Users → your user
+  → Add permissions → create policy from JSON: iam/ec2-ansible-lab-policy.json
+  (or attach managed policy AmazonEC2FullAccess for a personal lab).
+
+--------------------------------------------------------------------------------
+C.1) AWS EC2 — create instances (AWS Free Tier: t3.micro, us-east-1 in .env)
+--------------------------------------------------------------------------------
+  Prerequisite: .env has keys + EC2_KEY_PAIR_NAME + EC2_INSTANCE_TYPE=t3.micro
+  cd /mnt/c/dev/ansible/ansible
+  bash scripts/run_ec2_provision.sh     # runs playbooks/ec2_provision.yml
+  bash scripts/run_site.sh              # then: SSH configure all hosts
+
+--------------------------------------------------------------------------------
+D) MAIN PLAYBOOKS — pick the one you need
+--------------------------------------------------------------------------------
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │ Full suite (recommended):                                               │
+  │   bash scripts/run_site.sh                                              │
+  │   (runs: ping → create_linux_users → configure_managed_identity →       │
+  │          harden_ssh)                                                    │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ Individual playbooks:                                                   │
+  │   bash scripts/run_ping.sh                 # connectivity health check  │
+  │   bash scripts/run_facts.sh                # show OS/CPU/RAM/disk facts │
+  │   bash scripts/run_create_users_wsl.sh     # bulk users (managed_users) │
+  │   bash scripts/run_configure_managed_identity.sh  # per-host identity   │
+  │   bash scripts/run_harden_ssh.sh           # harden sshd_config         │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+Dry-run (preview changes without applying):
+  bash scripts/run_site.sh -- --check --diff
+  bash scripts/run_harden_ssh.sh --check --diff
+
+Targeted tag runs (faster, touch only specific resources):
+  bash scripts/run_site.sh -- --tags ping          # only connectivity
+  bash scripts/run_site.sh -- --tags ssh_key       # only authorized_keys
+  bash scripts/run_site.sh -- --tags sudo          # only sudoers drop-ins
+  bash scripts/run_site.sh -- --tags verify        # only getent/marker checks
+  bash scripts/run_site.sh -- --tags harden        # only SSH hardening
+
+--------------------------------------------------------------------------------
+E) Cursor Run Tasks  (Terminal → Run Task)
+--------------------------------------------------------------------------------
+  Ansible (WSL): full site [Ctrl+Shift+B]
+  Ansible (WSL): ping
+  Ansible (WSL): gather facts
+  Ansible (WSL): configure managed identity
+  Ansible (WSL): harden SSH
+  Ansible (WSL): galaxy install
+
+--------------------------------------------------------------------------------
+F) Verify users were created
+--------------------------------------------------------------------------------
+  bash scripts/verify_appoperator_all_hosts.sh     # appoperator on all hosts
+  bash scripts/verify_per_host_users.sh            # srv01ops … clientops
+
+Or inline per host:
+  ssh -i ~/.ssh/ec2-keypair.pem ec2-user@<IP> "getent passwd appoperator; id appoperator"
+
+--------------------------------------------------------------------------------
+G) Roles / file layout
+--------------------------------------------------------------------------------
+  roles/managed_user/          Reusable role for any Linux user management
+    defaults/main.yml          mu_username, mu_groups, mu_sudo_nopasswd, …
+    tasks/main.yml             Imports: create_user, ssh_keys, sudoers,
+                               fix_permissions, verify
+  playbooks/
+    site.yml                   Master orchestrator (imports all plays)
+    ping.yml                   Health check
+    gather_facts.yml           OS / hardware facts
+    create_linux_users.yml     Bulk users from vars/managed_users.yml
+    configure_managed_identity.yml  Per-host users from host_vars/
+    harden_ssh.yml             lineinfile hardening + sshd restart handler
+  inventory/
+    hosts.autogen.yml          Auto-generated from .env — do not edit
+    group_vars/all.yml         ansible_ssh_common_args
+    group_vars/linux.yml       managed_marker_filename
+    host_vars/<host>.yml       managed_login_name (e.g. srv01ops)
+  vars/
+    managed_users.yml          Gitignored — copy from managed_users.example.yml
+  .keys/
+    appoperator_ed25519.pub    Gitignored — public key for ansible-managed user
+
+--------------------------------------------------------------------------------
+H) Troubleshooting
+--------------------------------------------------------------------------------
+  • "ansible-playbook: not found"
+      → sudo apt install ansible  (section B)
+  • SSH UNREACHABLE
+      → Check PEM path, Security Group port 22 open, correct IPs in .env
+  • EC2 console shows no instances / wrong region
+      → AWS_DEFAULT_REGION in .env must match the console (e.g. us-east-1 for US East N. Virginia)
+  • "world writable directory" warning  ← FIXED (ANSIBLE_CONFIG exported in _env.sh)
+      → No longer a problem; ansible.cfg is loaded explicitly via env var
+  • "requiretty" error with pipelining
+      → Edit ansible.cfg: comment out "pipelining = True" under [ssh_connection]
+  • profile_tasks callback missing
+      → ansible-galaxy collection install ansible.posix --upgrade
+  • Fact cache stale
+      → rm -rf /tmp/ansible_facts_cache && re-run
+
+================================================================================

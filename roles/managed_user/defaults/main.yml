@@ -1,0 +1,18 @@
+---
+# Default variable values for the managed_user role.
+# Override any of these from the calling playbook via `vars:` or extra-vars.
+
+# Linux account settings
+mu_shell:         /bin/bash
+mu_groups:        wheel        # primary supplemental group
+mu_append_groups: true         # append (don't replace) existing groups
+mu_create_home:   true
+
+# SSH authorised keys — list of raw public-key strings.
+# Set to [] to skip key installation entirely.
+mu_ssh_public_keys: []
+mu_exclusive_keys: false       # true = wipe any key not in mu_ssh_public_keys
+
+# Passwordless sudo drop-in
+mu_sudo_nopasswd: false
+mu_sudoers_prefix: "90-ansible"   # prefix for /etc/sudoers.d/<prefix>-<username>

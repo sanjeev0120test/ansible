@@ -1,0 +1,185 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Ansible (WSL): [CHECK] pre-flight",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/check_setup.sh"],
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): install dependencies (apt + venv + collections)",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/install_dependencies.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): full site [Ctrl+Shift+B]",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_site.sh"],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): ping",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ping.sh"],
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): gather facts",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_facts.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): audit report",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_audit.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): security report",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_security.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): configure managed identity",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_configure_managed_identity.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): harden SSH",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_harden_ssh.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 status",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_status.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 provision",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_provision.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 stop (save cost)",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_stop.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 start",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_start.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 terminate (DESTRUCTIVE)",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_terminate.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 nuke — zero ALL billable resources (IRREVERSIBLE)",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_nuke.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): EC2 nuke --check (DRY RUN preview only)",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/run_ec2_nuke.sh --check"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): bootstrap AWS deps",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/bootstrap_aws.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): galaxy install",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && ANSIBLE_CONFIG=$(wslpath -a '${workspaceFolder}')/ansible.cfg ansible-galaxy collection install -r requirements.yml -p \"$HOME/.ansible/collections\" --upgrade"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): setup EC2 key",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cp -f \"$(wslpath -a '${env:USERPROFILE}/Downloads/key pair.pem')\" ~/.ssh/ec2-keypair.pem && chmod 600 ~/.ssh/ec2-keypair.pem && echo OK: ~/.ssh/ec2-keypair.pem"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ansible (WSL): verify users",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": ["-e", "bash", "-c", "cd \"$(wslpath -a '${workspaceFolder}')\" && bash scripts/verify_per_host_users.sh"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

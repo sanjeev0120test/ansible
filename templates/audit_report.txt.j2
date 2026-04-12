@@ -1,0 +1,42 @@
+================================================================================
+  ANSIBLE SYSTEM AUDIT REPORT
+  Generated : {{ now(utc=True).strftime('%Y-%m-%d %H:%M:%S UTC') }}
+  Hosts     : {{ ansible_play_hosts | length }}
+================================================================================
+{% for host in ansible_play_hosts %}
+________________________________________________________________________________
+  HOST : {{ "%-20s" | format(host) }}  IP : {{ hostvars[host].ansible_host | default('?') }}
+________________________________________________________________________________
+
+  OS       : {{ hostvars[host].ansible_distribution | default('?') }} {{ hostvars[host].ansible_distribution_version | default('?') }}
+  Kernel   : {{ hostvars[host].ansible_kernel | default('?') }}
+  Arch     : {{ hostvars[host].ansible_architecture | default('?') }}
+  vCPUs    : {{ hostvars[host].ansible_processor_vcpus | default('?') }}
+  RAM      : {{ hostvars[host].ansible_memtotal_mb | default('?') }} MB
+  Packages : {{ hostvars[host]._pkg_count.stdout | default('?') | trim }}
+
+── Memory ───────────────────────────────────────────────────────────────────────
+{{ hostvars[host]._free.stdout | default('N/A') | trim }}
+
+── Disk Usage ───────────────────────────────────────────────────────────────────
+{{ hostvars[host]._df.stdout | default('N/A') | trim }}
+
+── Listening Ports ──────────────────────────────────────────────────────────────
+{{ hostvars[host]._ports.stdout | default('N/A') | trim }}
+
+── Top Processes (CPU%) ─────────────────────────────────────────────────────────
+{{ hostvars[host]._procs.stdout | default('N/A') | trim }}
+
+── Running Services ─────────────────────────────────────────────────────────────
+{{ hostvars[host]._services.stdout | default('N/A') | trim }}
+
+── Current Users ────────────────────────────────────────────────────────────────
+{{ hostvars[host]._who.stdout | default('(none)') | trim }}
+
+── Recent Logins ────────────────────────────────────────────────────────────────
+{{ hostvars[host]._last.stdout | default('N/A') | trim }}
+
+{% endfor %}
+================================================================================
+  END OF REPORT
+================================================================================

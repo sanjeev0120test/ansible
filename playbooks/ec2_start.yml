@@ -1,0 +1,107 @@
+---
+# Start stopped ansible-lab EC2 instances; refresh public IPs in .env + inventory.
+#
+# SOURCE OF TRUTH — matches instances tagged Project=ansible-lab (same as provision).
+# Env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+# IPs change on stop/start unless you use Elastic IPs.
+#
+# Run: bash scripts/run_ec2_start.sh
+# Next: bash scripts/run_ping.sh && bash scripts/run_site.sh
+
+- name: Start ansible-lab EC2 instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region:      "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+    ec2_project_tag: "ansible-lab"
+
+  pre_tasks:
+    - name: Assert AWS_DEFAULT_REGION is set
+      ansible.builtin.assert:
+        that: aws_region | length > 0
+        fail_msg: "Set AWS_DEFAULT_REGION in .env (e.g. us-east-1 for US East N. Virginia)."
+      tags: [always]
+
+  tasks:
+    # Build the name→env-var map dynamically so it tracks ec2_project_tag with no duplication
+    - name: Build instance name map from project tag
+      ansible.builtin.set_fact:
+        ec2_name_map: >-
+          {{
+            {
+              ec2_project_tag + '-01': 'EC2_HOST_SERVER1',
+              ec2_project_tag + '-02': 'EC2_HOST_SERVER2',
+              ec2_project_tag + '-03': 'EC2_HOST_SERVER3',
+              ec2_project_tag + '-04': 'EC2_HOST_CLIENT',
+            }
+          }}
+      tags: [ec2]
+
+    - name: Find stopped ansible-lab instances
+      amazon.aws.ec2_instance_info:
+        region:  "{{ aws_region }}"
+        filters:
+          "tag:Project":        "{{ ec2_project_tag }}"
+          instance-state-name:  stopped
+      register: _stopped
+      tags: [ec2]
+
+    - name: Start instances
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ _stopped.instances | map(attribute='instance_id') | list }}"
+        region:       "{{ aws_region }}"
+        state:        started
+        wait:         true
+      when: _stopped.instances | length > 0
+      tags: [ec2]
+
+    - name: Fetch updated instance info (new public IPs)
+      amazon.aws.ec2_instance_info:
+        region:  "{{ aws_region }}"
+        filters:
+          "tag:Project":        "{{ ec2_project_tag }}"
+          instance-state-name:  running
+      register: _running
+      tags: [ec2]
+
+    - name: Wait for SSH on each instance
+      ansible.builtin.wait_for:
+        host:    "{{ item.public_ip_address }}"
+        port:    22
+        timeout: 120
+        delay:   10
+      loop: "{{ _running.instances }}"
+      loop_control:
+        label: "{{ item.tags.Name | default(item.instance_id) }}"
+      when: item.public_ip_address is defined
+      tags: [ec2]
+
+    - name: Update .env with fresh IPs
+      ansible.builtin.lineinfile:
+        path:   "{{ playbook_dir }}/../.env"
+        regexp: "^{{ ec2_name_map[item.tags.Name] | default('EC2_HOST_UNKNOWN') }}="
+        line:   "{{ ec2_name_map[item.tags.Name] | default('EC2_HOST_UNKNOWN') }}={{ item.public_ip_address }}"
+        state:  present
+      loop: "{{ _running.instances }}"
+      loop_control:
+        label: "{{ item.tags.Name | default(item.instance_id) }}"
+      when: item.tags.Name in ec2_name_map and item.public_ip_address is defined
+      tags: [ec2]
+
+    - name: Re-render inventory
+      ansible.builtin.command:
+        cmd:   "bash scripts/render_inventory_from_env.sh"
+        chdir: "{{ playbook_dir }}/.."
+      changed_when: true
+      tags: [ec2]
+
+    - name: Show new IPs
+      ansible.builtin.debug:
+        msg:
+          - "Instances started: {{ _running.instances | length }}"
+          - "New IPs written to .env and inventory"
+          - "Next: bash scripts/run_ping.sh  (verify SSH)"
+          - "Then: bash scripts/run_site.sh  (re-configure if needed)"
+      tags: [ec2]

@@ -1,0 +1,257 @@
+---
+# ec2_nuke.yml — Zero all billable AWS resources in the configured region.
+#
+# SOURCE OF TRUTH — Deletes ALL EC2 instances in AWS_DEFAULT_REGION (region-wide, not lab-tagged only).
+# Env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION. Always use bash scripts/run_ec2_nuke.sh.
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │  WHAT GETS DELETED                                                  │
+# │   • ALL EC2 instances (any state: running, stopped, pending)        │
+# │   • ALL detached (available) EBS volumes                            │
+# │   • ALL unassociated Elastic IPs                                    │
+# │   • Security groups tagged ManagedBy=ansible (not the default SG)  │
+# │                                                                     │
+# │  WHAT IS NOT TOUCHED                                                │
+# │   • Default VPC / subnets / internet gateway  (not billable)        │
+# │   • S3, RDS, Lambda, IAM, Route53, CloudWatch (not used by lab)     │
+# ├─────────────────────────────────────────────────────────────────────┤
+# │  SAFETY                                                             │
+# │   • run_ec2_nuke.sh shows a preview first, then requires you to    │
+# │     type "yes" before anything is deleted                           │
+# │   • --check flag performs a dry-run only (no changes)              │
+# │   • nuke_confirmed=yes must be set (done by the script for you)    │
+# └─────────────────────────────────────────────────────────────────────┘
+#
+# Run: bash scripts/run_ec2_nuke.sh
+# Dry-run (preview only): bash scripts/run_ec2_nuke.sh --check
+
+- name: AWS account cost cleanup — zero all billable resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region:      "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+    nuke_confirmed:  "{{ lookup('env', 'NUKE_CONFIRMED') | default('no', true) }}"
+
+  pre_tasks:
+    - name: Assert AWS_DEFAULT_REGION is configured
+      ansible.builtin.assert:
+        that: aws_region | length > 0
+        fail_msg: "Set AWS_DEFAULT_REGION in .env before nuke (e.g. us-east-1 for US East N. Virginia)."
+      tags: [always]
+
+    - name: Show target region
+      ansible.builtin.debug:
+        msg: "Scanning region: {{ aws_region }}"
+      tags: [always]
+
+  tasks:
+    # ── 1. Discover all resources ──────────────────────────────────────────────
+
+    - name: List all EC2 instances (running + stopped + pending)
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          instance-state-name:
+            - pending
+            - running
+            - stopping
+            - stopped
+      register: _all_instances
+      tags: [nuke]
+
+    - name: List all detached EBS volumes
+      amazon.aws.ec2_vol_info:
+        region: "{{ aws_region }}"
+        filters:
+          status: available
+      register: _detached_volumes
+      tags: [nuke]
+
+    - name: List all Elastic IPs
+      amazon.aws.ec2_eip_info:
+        region: "{{ aws_region }}"
+      register: _all_eips
+      tags: [nuke]
+
+    - name: List ansible-managed security groups
+      amazon.aws.ec2_security_group_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:ManagedBy": ansible
+      register: _ansible_sgs
+      tags: [nuke]
+
+    # ── 2. Preview ─────────────────────────────────────────────────────────────
+
+    - name: "Preview — EC2 instances ({{ _all_instances.instances | length }})"
+      ansible.builtin.debug:
+        msg: >-
+          {% if _all_instances.instances | length == 0 %}
+          No instances found.
+          {% else %}
+          {% for i in _all_instances.instances %}
+          {{ i.instance_id }}  {{ '%-10s' | format(i.state.name) }}  {{ i.instance_type }}  {{ i.tags.Name | default('(no-name)') }}
+          {% endfor %}
+          {% endif %}
+      tags: [nuke]
+
+    - name: "Preview — EBS volumes ({{ _detached_volumes.volumes | length }} detached)"
+      ansible.builtin.debug:
+        msg: >-
+          {% if _detached_volumes.volumes | length == 0 %}
+          No detached volumes found.
+          {% else %}
+          {% for v in _detached_volumes.volumes %}
+          {{ v.id }}  {{ v.size }}GB  {{ v.volume_type }}  {{ v.availability_zone }}
+          {% endfor %}
+          {% endif %}
+      tags: [nuke]
+
+    - name: "Preview — Elastic IPs ({{ _all_eips.addresses | length }} total)"
+      ansible.builtin.debug:
+        msg: >-
+          {% set unassoc = _all_eips.addresses | selectattr('association_id', 'undefined') | list %}
+          {% if unassoc | length == 0 %}
+          No unassociated EIPs found.
+          {% else %}
+          {% for eip in unassoc %}
+          {{ eip.public_ip }}  ({{ eip.allocation_id }})  unassociated — WILL BE RELEASED
+          {% endfor %}
+          {% endif %}
+      tags: [nuke]
+
+    - name: "Preview — Security groups ({{ _ansible_sgs.security_groups | length }} ansible-managed)"
+      ansible.builtin.debug:
+        msg: >-
+          {% if _ansible_sgs.security_groups | length == 0 %}
+          No ansible-managed security groups found.
+          {% else %}
+          {% for sg in _ansible_sgs.security_groups %}
+          {{ sg.group_id }}  {{ sg.group_name }}
+          {% endfor %}
+          {% endif %}
+      tags: [nuke]
+
+    # ── 3. Early-exit in --check (dry-run) mode ────────────────────────────────
+
+    - name: Dry-run complete — no changes made (pass --check to stay in preview mode)
+      ansible.builtin.debug:
+        msg:
+          - "=== DRY-RUN COMPLETE ==="
+          - "Region        : {{ aws_region }}"
+          - "Instances     : {{ _all_instances.instances | length }}"
+          - "EBS volumes   : {{ _detached_volumes.volumes | length }} detached"
+          - "Elastic IPs   : {{ _all_eips.addresses | length }} total"
+          - "Security grps : {{ _ansible_sgs.security_groups | length }} ansible-managed"
+          - ""
+          - "Run without --check (via run_ec2_nuke.sh) to execute deletion."
+      when: ansible_check_mode
+      tags: [nuke]
+
+    - name: Abort play in dry-run mode
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+      tags: [nuke]
+
+    # ── 4. Safety gate — must have nuke_confirmed=yes ─────────────────────────
+
+    - name: Verify explicit confirmation (nuke_confirmed=yes)
+      ansible.builtin.assert:
+        that: nuke_confirmed == 'yes'
+        fail_msg: |
+          SAFETY GATE: set NUKE_CONFIRMED=yes in your environment to proceed.
+          Use the script: bash scripts/run_ec2_nuke.sh
+          It shows a preview and asks you to type "yes" before proceeding.
+      tags: [nuke]
+
+    # ── 5. Terminate all EC2 instances ────────────────────────────────────────
+
+    - name: Terminate all EC2 instances (wait for terminated state)
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ _all_instances.instances | map(attribute='instance_id') | list }}"
+        region: "{{ aws_region }}"
+        state: terminated
+        wait: true
+      when: _all_instances.instances | length > 0
+      tags: [nuke]
+
+    # ── 6. Delete detached EBS volumes ────────────────────────────────────────
+    # Root volumes with delete_on_termination=true are already gone after step 5.
+    # This handles any stray/manually-created volumes.
+
+    - name: Delete detached EBS volume {{ item.id }}
+      amazon.aws.ec2_vol:
+        id: "{{ item.id }}"
+        region: "{{ aws_region }}"
+        state: absent
+      loop: "{{ _detached_volumes.volumes }}"
+      loop_control:
+        label: "{{ item.id }} ({{ item.size }}GB {{ item.volume_type }})"
+      tags: [nuke]
+
+    # ── 7. Release unassociated Elastic IPs ──────────────────────────────────
+
+    - name: Release unassociated Elastic IP {{ item.public_ip }}
+      amazon.aws.ec2_eip:
+        region: "{{ aws_region }}"
+        public_ip: "{{ item.public_ip }}"
+        state: absent
+        release_on_disassociation: true
+      loop: "{{ _all_eips.addresses }}"
+      loop_control:
+        label: "{{ item.public_ip }}"
+      when: not (item.association_id | default('') | length > 0)
+      tags: [nuke]
+
+    # ── 8. Delete ansible-managed security groups ─────────────────────────────
+    # Safe to delete now that all instances are terminated.
+    # ignore_errors: true guards against rare AWS consistency delays.
+
+    - name: Delete ansible-managed security group {{ item.group_name }}
+      amazon.aws.ec2_security_group:
+        group_id: "{{ item.group_id }}"
+        region: "{{ aws_region }}"
+        state: absent
+      loop: "{{ _ansible_sgs.security_groups }}"
+      loop_control:
+        label: "{{ item.group_name }} ({{ item.group_id }})"
+      ignore_errors: true
+      tags: [nuke]
+
+    # ── 9. Clear .env IPs ────────────────────────────────────────────────────
+
+    - name: Clear .env — {{ item }}
+      ansible.builtin.lineinfile:
+        path: "{{ playbook_dir }}/../.env"
+        regexp: "^{{ item }}="
+        line: "{{ item }}="
+        state: present
+      loop:
+        - EC2_HOST_SERVER1
+        - EC2_HOST_SERVER2
+        - EC2_HOST_SERVER3
+        - EC2_HOST_CLIENT
+      tags: [nuke]
+
+    # ── 10. Summary ───────────────────────────────────────────────────────────
+
+    - name: Nuke complete — cost summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================="
+          - "  AWS NUKE COMPLETE"
+          - "=============================="
+          - "Region          : {{ aws_region }}"
+          - "Instances nuked : {{ _all_instances.instances | length }}"
+          - "EBS deleted     : {{ _detached_volumes.volumes | length }}"
+          - "EIPs released   : checked and released"
+          - "SGs removed     : {{ _ansible_sgs.security_groups | length }}"
+          - ".env IPs        : cleared"
+          - ""
+          - "Your AWS account is cost-clean in {{ aws_region }}."
+          - ""
+          - "To provision fresh instances:"
+          - "  bash scripts/run_ec2_provision.sh"
+      tags: [nuke]

@@ -1,0 +1,105 @@
+---
+# Collect a system-wide audit snapshot from all hosts and save a timestamped
+# report to reports/audit_<timestamp>.txt on the control node (your laptop/WSL).
+#
+# Run: bash scripts/run_audit.sh
+# Output: reports/audit_YYYYMMDD_HHMMSS.txt
+#
+# No AWS credentials needed — pure SSH.
+# Tags: --tags audit
+
+- name: System audit — collect and report
+  hosts: linux
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Ensure reports directory exists on control node
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../reports"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      tags: [always]
+
+  tasks:
+    - name: Installed packages count
+      ansible.builtin.shell: >-
+        rpm -qa 2>/dev/null | wc -l ||
+        dpkg -l 2>/dev/null | grep -c '^ii' ||
+        echo 0
+      register:     _pkg_count
+      changed_when: false
+      failed_when:  false
+      tags: [audit]
+
+    - name: Memory
+      ansible.builtin.command: free -h
+      register:     _free
+      changed_when: false
+      tags: [audit]
+
+    - name: Disk usage
+      ansible.builtin.command: df -h
+      register:     _df
+      changed_when: false
+      tags: [audit]
+
+    - name: Listening ports
+      ansible.builtin.command: ss -tlnp
+      register:     _ports
+      changed_when: false
+      failed_when:  false
+      tags: [audit]
+
+    - name: Top processes by CPU
+      ansible.builtin.shell: "ps -eo user:12,pid,pcpu,pmem,comm --sort=-%cpu | head -11"
+      register:     _procs
+      changed_when: false
+      tags: [audit]
+
+    - name: Running services
+      ansible.builtin.shell: >-
+        systemctl list-units --type=service --state=running
+        --no-pager --no-legend 2>/dev/null | awk '{print $1}' | head -20
+        || echo "(systemd not available)"
+      register:     _services
+      changed_when: false
+      failed_when:  false
+      tags: [audit]
+
+    - name: Currently logged-in users
+      ansible.builtin.command: who
+      register:     _who
+      changed_when: false
+      failed_when:  false
+      tags: [audit]
+
+    - name: Recent logins (last 5)
+      ansible.builtin.command: last -n 5
+      register:     _last
+      changed_when: false
+      failed_when:  false
+      tags: [audit]
+
+  post_tasks:
+    - name: Render audit report on control node
+      ansible.builtin.template:
+        src:  "{{ playbook_dir }}/../templates/audit_report.txt.j2"
+        dest: "{{ playbook_dir }}/../reports/audit_{{ ansible_date_time.iso8601_basic_short }}.txt"
+        mode: "0644"
+      delegate_to: localhost
+      become:      false
+      run_once:    true
+      tags: [audit]
+
+    - name: Print report path
+      ansible.builtin.debug:
+        msg: >-
+          Audit report saved:
+          reports/audit_{{ ansible_date_time.iso8601_basic_short }}.txt
+          (view: cat reports/audit_{{ ansible_date_time.iso8601_basic_short }}.txt)
+      run_once: true
+      tags: [audit]

@@ -1,0 +1,61 @@
+================================================================================
+  ANSIBLE SECURITY COMPLIANCE REPORT
+  Generated : {{ now(utc=True).strftime('%Y-%m-%d %H:%M:%S UTC') }}
+  Hosts     : {{ ansible_play_hosts | length }}
+  Checks    : 8 controls per host
+================================================================================
+{% for host in ansible_play_hosts %}
+{% set hv = hostvars[host] %}
+{% set c1 = hv._sec_pw_auth.rc    | default(1) == 0 %}
+{% set c2 = hv._sec_root_login.rc | default(1) == 0 %}
+{% set c3 = hv._sec_pubkey.rc     | default(1) == 0 %}
+{% set c4 = hv._sec_max_tries.rc  | default(1) == 0 %}
+{% set c5 = hv._sec_x11.rc        | default(1) == 0 %}
+{% set c6 = hv._sec_tcp_fwd.rc    | default(1) == 0 %}
+{% set c7 = hv._sec_uid0.stdout   | default('root') | trim == 'root' %}
+{% set c8 = hv._sec_ww_etc.stdout | default('0')    | trim == '0'    %}
+{% set score = [c1,c2,c3,c4,c5,c6,c7,c8] | select | list | length %}
+________________________________________________________________________________
+  HOST : {{ "%-20s" | format(host) }}  IP : {{ hv.ansible_host | default('?') }}
+  SCORE: {{ score }}/8  ({{ ((score/8)*100) | round(0,'floor') | int }}%)
+________________________________________________________________________________
+
+  {{ '[PASS]' if c1 else '[FAIL]' }}  PasswordAuthentication = no     (disable password logins)
+  {{ '[PASS]' if c2 else '[FAIL]' }}  PermitRootLogin = no            (no direct root SSH)
+  {{ '[PASS]' if c3 else '[FAIL]' }}  PubkeyAuthentication = yes      (key auth enabled)
+  {{ '[PASS]' if c4 else '[FAIL]' }}  MaxAuthTries <= 4               (brute-force limit)
+  {{ '[PASS]' if c5 else '[FAIL]' }}  X11Forwarding = no              (disable X11 attack surface)
+  {{ '[PASS]' if c6 else '[FAIL]' }}  AllowTcpForwarding = no         (disable TCP tunnelling)
+  {{ '[PASS]' if c7 else '[FAIL]' }}  Only root has UID 0             (no privilege escalation)
+  {{ '[PASS]' if c8 else '[FAIL]' }}  No world-writable files in /etc (config file integrity)
+
+── Failed SSH Login Attempts (last 20) ──────────────────────────────────────────
+{{ hv._sec_failed_logins.stdout | default('(log not accessible or no failures)') | trim }}
+
+── Sudoers Drop-ins (/etc/sudoers.d/) ───────────────────────────────────────────
+{{ hv._sec_sudoers.stdout | default('(none)') | trim }}
+
+── Last 5 Logins ────────────────────────────────────────────────────────────────
+{{ hv._sec_last_logins.stdout | default('N/A') | trim }}
+
+{% endfor %}
+================================================================================
+  FLEET SECURITY SUMMARY
+================================================================================
+{% for host in ansible_play_hosts %}
+{% set hv = hostvars[host] %}
+{% set c1 = hv._sec_pw_auth.rc    | default(1) == 0 %}
+{% set c2 = hv._sec_root_login.rc | default(1) == 0 %}
+{% set c3 = hv._sec_pubkey.rc     | default(1) == 0 %}
+{% set c4 = hv._sec_max_tries.rc  | default(1) == 0 %}
+{% set c5 = hv._sec_x11.rc        | default(1) == 0 %}
+{% set c6 = hv._sec_tcp_fwd.rc    | default(1) == 0 %}
+{% set c7 = hv._sec_uid0.stdout   | default('root') | trim == 'root' %}
+{% set c8 = hv._sec_ww_etc.stdout | default('0')    | trim == '0'    %}
+{% set score = [c1,c2,c3,c4,c5,c6,c7,c8] | select | list | length %}
+  {{ "%-15s" | format(host) }}  {{ score }}/8  {{ '#' * score }}{{ '.' * (8 - score) }}  {{ ((score/8)*100) | round(0,'floor') | int }}%
+{% endfor %}
+
+================================================================================
+  END OF REPORT
+================================================================================

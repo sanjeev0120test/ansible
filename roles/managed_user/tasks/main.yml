@@ -1,0 +1,24 @@
+---
+# Role entry point — import sub-task files in dependency order.
+# Every sub-file carries its own descriptive tags so callers can run
+# targeted subsets: ansible-playbook site.yml --tags ssh_key
+
+- name: "Create user account for {{ mu_username }}"
+  ansible.builtin.import_tasks: create_user.yml
+  tags: [managed_user, user]
+
+- name: "Install SSH public keys for {{ mu_username }}"
+  ansible.builtin.import_tasks: ssh_keys.yml
+  tags: [managed_user, ssh_key]
+
+- name: "Configure sudoers for {{ mu_username }}"
+  ansible.builtin.import_tasks: sudoers.yml
+  tags: [managed_user, sudo]
+
+- name: "Fix SSH directory permissions for {{ mu_username }}"
+  ansible.builtin.import_tasks: fix_permissions.yml
+  tags: [managed_user, ssh_key, permissions]
+
+- name: "Verify account for {{ mu_username }}"
+  ansible.builtin.import_tasks: verify.yml
+  tags: [managed_user, verify]

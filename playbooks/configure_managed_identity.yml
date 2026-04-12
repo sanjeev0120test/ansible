@@ -1,0 +1,104 @@
+---
+# Configure per-host Linux identity: user, sudo, SSH key, audit marker files.
+#
+# Each host gets a unique login from inventory/host_vars/<host>.yml (managed_login_name).
+# Run: bash scripts/run_configure_managed_identity.sh
+# Targeted tag runs:
+#   --tags user          only create/update the account
+#   --tags ssh_key       only update authorized_keys + permissions
+#   --tags sudo          only update sudoers drop-in
+#   --tags files         only write marker + sample files
+#   --tags verify        only read back marker file
+#   --check --diff       dry-run with change preview
+
+- name: Managed Linux users and home files
+  hosts: linux
+  become: true
+  gather_facts: true
+  vars:
+    _managed_pubkey_default: "{{ playbook_dir }}/../.keys/appoperator_ed25519.pub"
+    # Override via env: export ANSIBLE_MANAGED_PUBKEY_PATH=/path/to/key.pub
+    managed_ssh_pubkey_path: >-
+      {{ lookup('env', 'ANSIBLE_MANAGED_PUBKEY_PATH') | default(_managed_pubkey_default, true) }}
+
+  pre_tasks:
+    - name: Assert ansible_host is configured
+      ansible.builtin.assert:
+        that:
+          - ansible_host is defined
+          - ansible_host | length > 0
+        fail_msg: >-
+          Missing ansible_host for {{ inventory_hostname }}.
+          Export EC2_HOST_{{ inventory_hostname | upper }} from .env.
+      tags: [always]
+
+    - name: Assert managed_login_name is defined
+      ansible.builtin.assert:
+        that:
+          - managed_login_name is defined
+          - managed_login_name | length > 0
+        fail_msg: >-
+          Define managed_login_name in inventory/host_vars/{{ inventory_hostname }}.yml
+      tags: [always]
+
+    - name: Stat public key file on control node
+      ansible.builtin.stat:
+        path: "{{ managed_ssh_pubkey_path }}"
+      delegate_to: localhost
+      become:      false
+      register:    _pub_stat
+      tags: [always]
+
+    - name: Assert public key file exists
+      ansible.builtin.assert:
+        that: _pub_stat.stat.exists
+        fail_msg: >-
+          Missing {{ managed_ssh_pubkey_path }}.
+          Generate a key pair:
+            ssh-keygen -t ed25519 -f .keys/appoperator_ed25519 -N "" -C "ansible-managed"
+      tags: [always]
+
+  tasks:
+    - name: "Apply managed_user role for {{ managed_login_name }} on {{ inventory_hostname }}"
+      ansible.builtin.include_role:
+        name: managed_user
+      vars:
+        mu_username:        "{{ managed_login_name }}"
+        mu_shell:           /bin/bash
+        mu_groups:          wheel
+        mu_append_groups:   true
+        mu_sudo_nopasswd:   true
+        mu_ssh_public_keys: ["{{ lookup('file', managed_ssh_pubkey_path) }}"]
+      tags: [identity, user, ssh_key, sudo]
+
+    - name: Write audit marker file
+      ansible.builtin.copy:
+        dest:    "/home/{{ managed_login_name }}/{{ managed_marker_filename }}"
+        content: >-
+          # managed-by-ansible host={{ inventory_hostname }}
+          login={{ managed_login_name }}
+          ts={{ ansible_date_time.iso8601 }}
+        owner: "{{ managed_login_name }}"
+        group: "{{ managed_login_name }}"
+        mode:  "0644"
+      tags: [identity, files]
+
+    - name: Write sample managed file
+      ansible.builtin.copy:
+        dest:    "/home/{{ managed_login_name }}/sample-managed.txt"
+        content: "sample-managed-content host={{ inventory_hostname }} login={{ managed_login_name }}\n"
+        owner: "{{ managed_login_name }}"
+        group: "{{ managed_login_name }}"
+        mode:  "0644"
+      tags: [identity, files]
+
+    - name: Read back audit marker
+      ansible.builtin.command: "cat /home/{{ managed_login_name }}/{{ managed_marker_filename }}"
+      register:     _marker
+      changed_when: false
+      tags: [identity, verify]
+
+    - name: Display audit marker
+      ansible.builtin.debug:
+        msg: "{{ _marker.stdout }}"
+      tags: [identity, verify]

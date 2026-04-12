@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author:          ansible-managed
+  description:     "Create and configure managed Linux user accounts with SSH keys and optional sudo."
+  license:         MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name:     Amazon
+      versions: ["2", "2023"]
+    - name:     EL
+      versions: ["8", "9"]
+dependencies: []

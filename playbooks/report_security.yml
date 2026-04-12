@@ -1,0 +1,159 @@
+---
+# Security compliance check across all hosts.
+# Tests 8 controls against CIS / AWS best-practice baseline.
+# Saves PASS/FAIL report with score to reports/security_<timestamp>.txt
+#
+# Run: bash scripts/run_security.sh
+# Output: reports/security_YYYYMMDD_HHMMSS.txt
+#
+# No AWS credentials needed — pure SSH.
+# Tags: --tags security
+
+- name: Security compliance check — collect and report
+  hosts: linux
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Ensure reports directory exists on control node
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../reports"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      tags: [always]
+
+    - name: Set report timestamp
+      ansible.builtin.set_fact:
+        sec_ts: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+      delegate_to: localhost
+      run_once: true
+      tags: [always]
+
+    - name: Share timestamp across all hosts
+      ansible.builtin.set_fact:
+        sec_ts: "{{ hostvars[groups['linux'][0]].sec_ts }}"
+      tags: [always]
+
+  tasks:
+    # ── SSH hardening controls ─────────────────────────────────────────────────
+    - name: "SSH: PasswordAuthentication = no"
+      ansible.builtin.command: "grep -E '^PasswordAuthentication[[:space:]]+no' /etc/ssh/sshd_config"
+      register:     _sec_pw_auth
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "SSH: PermitRootLogin = no"
+      ansible.builtin.command: "grep -E '^PermitRootLogin[[:space:]]+no' /etc/ssh/sshd_config"
+      register:     _sec_root_login
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "SSH: PubkeyAuthentication = yes"
+      ansible.builtin.command: "grep -E '^PubkeyAuthentication[[:space:]]+yes' /etc/ssh/sshd_config"
+      register:     _sec_pubkey
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "SSH: MaxAuthTries <= 4"
+      ansible.builtin.shell: "awk '/^MaxAuthTries/ {exit ($2+0 <= 4) ? 0 : 1}' /etc/ssh/sshd_config; [ $? -eq 0 ] || exit 1"
+      register:     _sec_max_tries
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "SSH: X11Forwarding = no"
+      ansible.builtin.command: "grep -E '^X11Forwarding[[:space:]]+no' /etc/ssh/sshd_config"
+      register:     _sec_x11
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "SSH: AllowTcpForwarding = no"
+      ansible.builtin.command: "grep -E '^AllowTcpForwarding[[:space:]]+no' /etc/ssh/sshd_config"
+      register:     _sec_tcp_fwd
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    # ── Account controls ───────────────────────────────────────────────────────
+    - name: "Accounts: all UID 0 users"
+      ansible.builtin.shell: "awk -F: '$3==0{print $1}' /etc/passwd"
+      register:     _sec_uid0
+      changed_when: false
+      tags: [security]
+
+    - name: "Files: world-writable files in /etc (count)"
+      ansible.builtin.shell: "find /etc -maxdepth 2 -perm -o+w -type f 2>/dev/null | wc -l"
+      register:     _sec_ww_etc
+      changed_when: false
+      tags: [security]
+
+    # ── Evidence gathering ─────────────────────────────────────────────────────
+    - name: "Evidence: failed SSH logins (last 20)"
+      ansible.builtin.shell: >-
+        grep -i "Failed password\|authentication failure" /var/log/secure 2>/dev/null
+        | tail -20
+        || grep -i "Failed password\|authentication failure" /var/log/auth.log 2>/dev/null
+        | tail -20
+        || echo "(log not accessible — run as root for full audit)"
+      register:     _sec_failed_logins
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "Evidence: sudoers drop-ins"
+      ansible.builtin.shell: "ls -la /etc/sudoers.d/ 2>/dev/null && echo '---' && for f in /etc/sudoers.d/*; do echo \"[$f]\"; cat \"$f\" 2>/dev/null; done"
+      register:     _sec_sudoers
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    - name: "Evidence: last 5 logins"
+      ansible.builtin.command: "last -n 5"
+      register:     _sec_last_logins
+      changed_when: false
+      failed_when:  false
+      tags: [security]
+
+    # ── Print per-host summary to terminal ────────────────────────────────────
+    - name: Show security score
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} score:
+          {{ [
+            _sec_pw_auth.rc    == 0,
+            _sec_root_login.rc == 0,
+            _sec_pubkey.rc     == 0,
+            _sec_max_tries.rc  == 0,
+            _sec_x11.rc        == 0,
+            _sec_tcp_fwd.rc    == 0,
+            _sec_uid0.stdout | trim == 'root',
+            _sec_ww_etc.stdout | trim == '0'
+          ] | select | list | length }}/8 controls passing
+      tags: [security]
+
+  post_tasks:
+    - name: Render security report on control node
+      ansible.builtin.template:
+        src:  "{{ playbook_dir }}/../templates/security_report.txt.j2"
+        dest: "{{ playbook_dir }}/../reports/security_{{ sec_ts }}.txt"
+        mode: "0644"
+      delegate_to: localhost
+      become:      false
+      run_once:    true
+      tags: [security]
+
+    - name: Print report path
+      ansible.builtin.debug:
+        msg: >-
+          Security report saved:
+          reports/security_{{ sec_ts }}.txt
+          (view: cat reports/security_{{ sec_ts }}.txt)
+      run_once: true
+      tags: [security]

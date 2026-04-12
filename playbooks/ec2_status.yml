@@ -1,0 +1,64 @@
+---
+# Read-only: list ansible-lab instances from AWS (no SSH).
+#
+# SOURCE OF TRUTH — Project=ansible-lab in AWS_DEFAULT_REGION.
+# Env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+#
+# Run: bash scripts/run_ec2_status.sh
+
+- name: EC2 fleet status
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region:      "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+    ec2_project_tag: "ansible-lab"
+
+  tasks:
+    - name: Assert AWS_DEFAULT_REGION is set
+      ansible.builtin.assert:
+        that: aws_region | length > 0
+        fail_msg: "Set AWS_DEFAULT_REGION in .env to your EC2 console region (e.g. us-east-1 for US East N. Virginia)."
+      tags: [ec2]
+
+    - name: Discover all ansible-lab instances (any state)
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ ec2_project_tag }}"
+      register: _instances
+      tags: [ec2]
+
+    - name: Show instance count
+      ansible.builtin.debug:
+        msg: "Found {{ _instances.instances | length }} instance(s) tagged Project={{ ec2_project_tag }} in {{ aws_region }}"
+      tags: [ec2]
+
+    - name: Show per-instance details
+      ansible.builtin.debug:
+        msg:
+          name:           "{{ item.tags.Name | default('(no name)') }}"
+          instance_id:    "{{ item.instance_id }}"
+          state:          "{{ item.state.name }}"
+          type:           "{{ item.instance_type }}"
+          public_ip:      "{{ item.public_ip_address | default('(none — stopped?)') }}"
+          private_ip:     "{{ item.private_ip_address | default('n/a') }}"
+          az:             "{{ item.placement.availability_zone }}"
+          launch_time:    "{{ item.launch_time }}"
+          ami_id:         "{{ item.image_id }}"
+      loop:         "{{ _instances.instances }}"
+      loop_control:
+        label: "{{ item.tags.Name | default(item.instance_id) }}"
+      tags: [ec2]
+
+    - name: Show cost-awareness reminder
+      ansible.builtin.debug:
+        msg:
+          - "Billing: check AWS console / Cost Explorer for your free-tier usage"
+          - "Running instances: {{ _instances.instances | selectattr('state.name', 'equalto', 'running') | list | length }}"
+          - "Stopped instances: {{ _instances.instances | selectattr('state.name', 'equalto', 'stopped') | list | length }}"
+          - "Stop to save cost: bash scripts/run_ec2_stop.sh"
+          - "Terminate to delete: bash scripts/run_ec2_terminate.sh"
+      run_once: true
+      tags: [ec2]

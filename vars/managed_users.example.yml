@@ -1,0 +1,19 @@
+---
+# Copy to vars/managed_users.yml (gitignored) and edit.
+# Paste your PUBLIC key(s) only — never commit private keys.
+#
+# Generate a key on the machine you will SSH *from* (laptop or “client”):
+#   ssh-keygen -t ed25519 -C "you@example" -f ~/.ssh/id_ed25519
+# (RSA is still fine for older clients: ssh-keygen -t rsa -b 4096)
+#
+# Show public key to paste below:
+#   cat ~/.ssh/id_ed25519.pub
+
+managed_users:
+  - username: appoperator
+    shell: /bin/bash
+    groups: wheel
+    append_groups: true
+    sudo_nopasswd: true
+    ssh_public_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...replace-me appoperator@laptop"

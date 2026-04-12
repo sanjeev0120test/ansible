@@ -1,0 +1,18 @@
+# Local secrets — copy from *.example.yml
+vars/managed_users.yml
+*.pem
+*.key
+.keys/
+.vault_pass
+.ec2-ansible-nospace.pem
+.env
+inventory/hosts.autogen.yml
+# Generated reports (local only — contain server details)
+reports/*.txt
+reports/*.html
+# Keep the dir itself
+!reports/.gitkeep
+# Fact cache
+/tmp/ansible_facts_cache
+# Python venv (boto3 / awscli — created by scripts/bootstrap_aws.sh)
+.venv/

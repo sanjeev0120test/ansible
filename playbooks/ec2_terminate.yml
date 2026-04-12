@@ -1,0 +1,77 @@
+---
+# DESTRUCTIVE: terminate all ansible-lab instances (running/stopped/pending) and clear EC2_HOST_* in .env.
+#
+# SOURCE OF TRUTH — Project=ansible-lab in AWS_DEFAULT_REGION.
+# Env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+#
+# Run: bash scripts/run_ec2_terminate.sh
+# Dry-run: bash scripts/run_ec2_terminate.sh --check
+# Recreate: bash scripts/run_ec2_provision.sh
+
+- name: Terminate ansible-lab EC2 instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region:      "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+    ec2_project_tag: "ansible-lab"
+
+  pre_tasks:
+    - name: Assert AWS_DEFAULT_REGION is set
+      ansible.builtin.assert:
+        that: aws_region | length > 0
+        fail_msg: "Set AWS_DEFAULT_REGION in .env (e.g. us-east-1 for US East N. Virginia)."
+      tags: [always]
+
+  tasks:
+    - name: Discover all ansible-lab instances
+      amazon.aws.ec2_instance_info:
+        region:  "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ ec2_project_tag }}"
+          instance-state-name:
+            - running
+            - stopped
+            - pending
+      register: _instances
+      tags: [ec2]
+
+    - name: Show instances to be terminated
+      ansible.builtin.debug:
+        msg:
+          - "ABOUT TO TERMINATE {{ _instances.instances | length }} instance(s):"
+          - "{% for i in _instances.instances %}  {{ i.tags.Name | default('unnamed') }} ({{ i.instance_id }}) — {{ i.state.name }}{% endfor %}"
+          - "This is IRREVERSIBLE. Run without --check to proceed."
+      tags: [ec2]
+
+    - name: Terminate instances
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ _instances.instances | map(attribute='instance_id') | list }}"
+        region:       "{{ aws_region }}"
+        state:        terminated
+        wait:         true
+      when: _instances.instances | length > 0
+      tags: [ec2]
+
+    - name: Clear .env IPs (set to empty)
+      ansible.builtin.lineinfile:
+        path:   "{{ playbook_dir }}/../.env"
+        regexp: "^{{ item }}="
+        line:   "{{ item }}="
+        state:  present
+      loop:
+        - EC2_HOST_SERVER1
+        - EC2_HOST_SERVER2
+        - EC2_HOST_SERVER3
+        - EC2_HOST_CLIENT
+      when: _instances.instances | length > 0
+      tags: [ec2]
+
+    - name: Confirm termination
+      ansible.builtin.debug:
+        msg:
+          - "{{ _instances.instances | length }} instance(s) terminated."
+          - ".env IPs cleared."
+          - "Provision fresh: bash scripts/run_ec2_provision.sh"
+      tags: [ec2]

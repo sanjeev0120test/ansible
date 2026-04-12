@@ -1,0 +1,56 @@
+---
+# Gather and display useful EC2 instance facts (OS, memory, CPUs, disk, network).
+# Run: bash scripts/run_facts.sh
+# Useful for auditing lab instance sizes (t3.micro default) and confirming OS versions.
+
+- name: Gather and display host facts
+  hosts: linux
+  become: false
+  gather_facts: true
+
+  tasks:
+    - name: Gather selective hardware + network facts
+      ansible.builtin.setup:
+        gather_subset:
+          - hardware
+          - network
+          - virtual
+      tags: [facts]
+
+    - name: Display instance summary
+      ansible.builtin.debug:
+        msg:
+          host:         "{{ inventory_hostname }}"
+          ip:           "{{ ansible_host }}"
+          os:           "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel:       "{{ ansible_kernel }}"
+          arch:         "{{ ansible_architecture }}"
+          vcpus:        "{{ ansible_processor_vcpus }}"
+          ram_mb:       "{{ ansible_memtotal_mb }}"
+          disk_root_gb: >-
+            {{ (ansible_mounts
+                | selectattr('mount', 'equalto', '/')
+                | map(attribute='size_available')
+                | first
+                / 1073741824) | round(1) }}
+          default_ipv4: "{{ ansible_default_ipv4.address | default('n/a') }}"
+          interfaces:   "{{ ansible_interfaces }}"
+      tags: [facts]
+
+    - name: Aggregate summary across fleet
+      ansible.builtin.set_fact:
+        _host_summary:
+          host:    "{{ inventory_hostname }}"
+          os:      "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          vcpus:   "{{ ansible_processor_vcpus }}"
+          ram_mb:  "{{ ansible_memtotal_mb }}"
+      tags: [facts]
+
+    - name: Display fleet summary (run-once on localhost)
+      ansible.builtin.debug:
+        msg: >-
+          Fleet summary — {{ ansible_play_hosts | length }} hosts:
+          {% for h in ansible_play_hosts %}
+          {{ h }}{% endfor %}
+      run_once: true
+      tags: [facts]

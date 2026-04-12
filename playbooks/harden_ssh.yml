@@ -1,0 +1,68 @@
+---
+# Harden sshd_config on all Linux hosts.
+# Safe to re-run — all tasks are idempotent via ansible.builtin.lineinfile.
+# sshd is restarted ONLY when at least one setting changes.
+#
+# Run: bash scripts/run_harden_ssh.sh
+# Dry run: bash scripts/run_harden_ssh.sh --check --diff
+#
+# WARNING: Verify you have SSH key access BEFORE running.
+#          PasswordAuthentication will be set to 'no'.
+#          On AWS EC2, key-based access is the default — this is safe.
+#
+# Tags:
+#   --tags harden     all hardening tasks
+#   --tags sshd       only sshd_config changes
+
+- name: Harden SSH daemon configuration
+  hosts: linux
+  become: true
+  gather_facts: false
+
+  handlers:
+    - name: Restart sshd
+      ansible.builtin.service:
+        name:  sshd
+        state: restarted
+
+  tasks:
+    - name: Apply sshd_config hardening settings
+      ansible.builtin.lineinfile:
+        path:   /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line:   "{{ item.line }}"
+        state:  present
+        backup: true
+      loop:
+        # Disable password logins — key-based only.
+        - { regexp: '^#?PasswordAuthentication\b',  line: 'PasswordAuthentication no' }
+        # Never allow direct root SSH.
+        - { regexp: '^#?PermitRootLogin\b',          line: 'PermitRootLogin no' }
+        # Ensure public-key auth is explicitly on.
+        - { regexp: '^#?PubkeyAuthentication\b',     line: 'PubkeyAuthentication yes' }
+        # Limit brute-force attempts.
+        - { regexp: '^#?MaxAuthTries\b',             line: 'MaxAuthTries 3' }
+        # Drop idle sessions after 5 min (300 s × 2 = 10 min grace).
+        - { regexp: '^#?ClientAliveInterval\b',      line: 'ClientAliveInterval 300' }
+        - { regexp: '^#?ClientAliveCountMax\b',      line: 'ClientAliveCountMax 2' }
+        # Disable unused forwarding attack surface.
+        - { regexp: '^#?X11Forwarding\b',            line: 'X11Forwarding no' }
+        - { regexp: '^#?AllowTcpForwarding\b',       line: 'AllowTcpForwarding no' }
+        # Log level INFO is the recommended minimum.
+        - { regexp: '^#?LogLevel\b',                 line: 'LogLevel INFO' }
+      loop_control:
+        label: "{{ item.line }}"
+      notify: Restart sshd
+      tags:   [harden, sshd]
+
+    - name: Validate sshd_config syntax
+      ansible.builtin.command: sshd -t
+      register:     _sshd_test
+      changed_when: false
+      failed_when:  _sshd_test.rc != 0
+      tags: [harden, sshd]
+
+    - name: Show sshd_config validation result
+      ansible.builtin.debug:
+        msg: "sshd -t passed on {{ inventory_hostname }}"
+      tags: [harden, sshd]

@@ -1,0 +1,19 @@
+---
+# Manage passwordless sudo drop-in for the user.
+# Creates the file when mu_sudo_nopasswd=true, removes it when false — idempotent.
+
+- name: "Grant passwordless sudo for '{{ mu_username }}'"
+  ansible.builtin.copy:
+    dest:    "/etc/sudoers.d/{{ mu_sudoers_prefix }}-{{ mu_username }}"
+    content: "{{ mu_username }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner:   root
+    group:   root
+    mode:    "0440"
+    validate: "visudo -cf %s"
+  when: mu_sudo_nopasswd | bool
+
+- name: "Remove passwordless sudo for '{{ mu_username }}' (sudo_nopasswd=false)"
+  ansible.builtin.file:
+    path:  "/etc/sudoers.d/{{ mu_sudoers_prefix }}-{{ mu_username }}"
+    state: absent
+  when: not (mu_sudo_nopasswd | bool)

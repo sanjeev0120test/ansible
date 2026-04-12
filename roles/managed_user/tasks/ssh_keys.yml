@@ -1,0 +1,14 @@
+---
+# Install SSH public keys for the managed user.
+# Skipped automatically when mu_ssh_public_keys is empty.
+- name: "Install SSH authorized_keys for '{{ mu_username }}'"
+  ansible.posix.authorized_key:
+    user:      "{{ mu_username }}"
+    key:       "{{ mu_key }}"
+    state:     present
+    exclusive: "{{ mu_exclusive_keys }}"
+  loop: "{{ mu_ssh_public_keys }}"
+  loop_control:
+    loop_var: mu_key
+    label: "{{ mu_key | truncate(40, True, '...') }}"
+  when: mu_ssh_public_keys | length > 0

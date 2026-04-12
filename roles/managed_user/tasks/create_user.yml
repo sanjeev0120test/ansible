@@ -1,0 +1,10 @@
+---
+# Create (or idempotently update) the Linux user account.
+- name: "Ensure user '{{ mu_username }}' exists"
+  ansible.builtin.user:
+    name:        "{{ mu_username }}"
+    shell:       "{{ mu_shell }}"
+    groups:      "{{ mu_groups | default(omit) }}"
+    append:      "{{ mu_append_groups }}"
+    create_home: "{{ mu_create_home }}"
+    state:       present

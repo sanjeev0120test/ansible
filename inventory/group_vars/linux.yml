@@ -1,0 +1,3 @@
+---
+# Shared settings for inventory group `linux`.
+managed_marker_filename: ".managed-by-ansible"

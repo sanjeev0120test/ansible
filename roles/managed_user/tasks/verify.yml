@@ -1,0 +1,13 @@
+---
+# Verify the account is fully configured and print a summary line.
+# Uses getent (NSS-aware) so it works with both local and LDAP-backed accounts.
+
+- name: "Verify '{{ mu_username }}' exists in passwd database"
+  ansible.builtin.command: "getent passwd {{ mu_username }}"
+  register:     _verify_passwd
+  changed_when: false
+  failed_when:  _verify_passwd.rc != 0
+
+- name: "Show account summary for '{{ mu_username }}'"
+  ansible.builtin.debug:
+    msg: "{{ _verify_passwd.stdout }}"

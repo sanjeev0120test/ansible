@@ -1,0 +1,317 @@
+---
+# Provision EC2 instances for the ansible lab (AWS Free Tier: t3.micro default, us-east-1 in docs).
+#
+# SOURCE OF TRUTH — read this header before changing behavior or env vars.
+#
+# What this does:
+#   1. Resolves latest Amazon Linux 2023 x86_64 AMI in AWS_DEFAULT_REGION
+#   2. Ensures security group ansible-lab-sg (SSH 22; ASCII-only description for EC2 API)
+#   3. Resolves default VPC + a subnet (required for public IP; no deprecated `network:` key)
+#   4. Launches N instances (EC2_INSTANCE_COUNT 1–4) with name ansible-lab-01 … ansible-lab-0N
+#   5. Waits for TCP 22 on each public IP
+#   6. Writes EC2_HOST_* into repo .env and runs scripts/render_inventory_from_env.sh
+#
+# Required environment (.env):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+#   EC2_KEY_PAIR_NAME          (must exist in this region)
+#   EC2_INSTANCE_COUNT (optional, default 2)
+#   EC2_INSTANCE_TYPE        (optional, default t3.micro — AWS Free Tier lab standard)
+#
+# Requires: default VPC in the region (AWS creates one by default; else create default VPC in console).
+#
+# Run (do not call ansible-playbook directly unless you match run_ec2_provision.sh extra vars):
+#   bash scripts/run_ec2_provision.sh
+#
+# Idempotent: one instance per slot (tags Project + Number). Re-runs reuse or start
+# stopped instances; duplicate slots (same Number on two IDs) fail fast with a clear message.
+#
+# Cost: stop when idle — bash scripts/run_ec2_stop.sh
+
+- name: Provision EC2 instances — ansible lab
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region:          "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+    ec2_key_pair:        "{{ lookup('env', 'EC2_KEY_PAIR_NAME') }}"
+    ec2_instance_count:  "{{ lookup('env', 'EC2_INSTANCE_COUNT') | default('2', true) | int }}"
+    ec2_instance_type:   "{{ lookup('env', 'EC2_INSTANCE_TYPE')  | default('t3.micro', true) }}"
+    ec2_project_tag:     "ansible-lab"
+    ec2_sg_name:         "ansible-lab-sg"
+    # Maps loop index (1-4) to .env var suffix and inventory hostname
+    ec2_name_map:
+      1: { env_var: "EC2_HOST_SERVER1", hostname: "server1" }
+      2: { env_var: "EC2_HOST_SERVER2", hostname: "server2" }
+      3: { env_var: "EC2_HOST_SERVER3", hostname: "server3" }
+      4: { env_var: "EC2_HOST_CLIENT",  hostname: "client"  }
+
+  pre_tasks:
+    - name: Assert AWS_DEFAULT_REGION is set
+      ansible.builtin.assert:
+        that: aws_region | length > 0
+        fail_msg: "Set AWS_DEFAULT_REGION in .env (e.g. us-east-1 for US East N. Virginia)."
+      tags: [always]
+
+    - name: Assert EC2_KEY_PAIR_NAME is set
+      ansible.builtin.assert:
+        that:
+          - ec2_key_pair is defined
+          - ec2_key_pair | length > 0
+        fail_msg: >-
+          Set EC2_KEY_PAIR_NAME in .env.
+          This is the NAME of your key pair in the AWS console (not the file path).
+          AWS Console → EC2 → Key Pairs.
+      tags: [always]
+
+    - name: Assert instance count is 1–4
+      ansible.builtin.assert:
+        that:
+          - ec2_instance_count | int >= 1
+          - ec2_instance_count | int <= 4
+        fail_msg: "EC2_INSTANCE_COUNT must be 1–4 (free-tier recommended: 2)"
+      tags: [always]
+
+    - name: Show provisioning plan
+      ansible.builtin.debug:
+        msg:
+          - "Region        : {{ aws_region }}"
+          - "Instance type : {{ ec2_instance_type }}"
+          - "Instance count: {{ ec2_instance_count }}"
+          - "Key pair      : {{ ec2_key_pair }}"
+          - "Project tag   : {{ ec2_project_tag }}"
+      tags: [always]
+
+  tasks:
+    # ── AMI Discovery ──────────────────────────────────────────────────────────
+    - name: Find latest Amazon Linux 2023 AMI (no hardcoding)
+      amazon.aws.ec2_ami_info:
+        region:  "{{ aws_region }}"
+        owners:  [amazon]
+        filters:
+          name:         "al2023-ami-2023*-x86_64"
+          architecture: x86_64
+          state:        available
+      register: _amis
+      tags: [ec2, provision]
+
+    - name: Select most recent AMI
+      ansible.builtin.set_fact:
+        ec2_ami_id: "{{ (_amis.images | sort(attribute='creation_date') | last).image_id }}"
+      tags: [ec2, provision]
+
+    - name: Assert AMI discovery succeeded
+      ansible.builtin.assert:
+        that:
+          - _amis.images is defined
+          - _amis.images | length > 0
+          - ec2_ami_id is defined
+          - ec2_ami_id | length > 0
+        fail_msg: >-
+          No Amazon Linux 2023 x86_64 AMI matched filters in {{ aws_region }}.
+          Check region and AWS API access.
+      tags: [ec2, provision]
+
+    - name: Show AMI selected
+      ansible.builtin.debug:
+        msg: "Using AMI: {{ ec2_ami_id }} (latest Amazon Linux 2023 in {{ aws_region }})"
+      tags: [ec2, provision]
+
+    # ── Security Group ─────────────────────────────────────────────────────────
+    - name: Create/ensure security group
+      amazon.aws.ec2_security_group:
+        name:        "{{ ec2_sg_name }}"
+        # EC2 GroupDescription must be ASCII-only (no em/en dashes or Unicode).
+        description: "Ansible Lab - SSH (managed by Ansible)"
+        region:      "{{ aws_region }}"
+        rules:
+          - proto:     tcp
+            ports:     [22]
+            cidr_ip:   "0.0.0.0/0"
+            rule_desc: "SSH from anywhere (restrict to your IP in production)"
+        rules_egress:
+          - proto:   all
+            cidr_ip: "0.0.0.0/0"
+        tags:
+          Project:   "{{ ec2_project_tag }}"
+          ManagedBy: ansible
+      register: _sg
+      tags: [ec2, provision]
+
+    - name: Show security group
+      ansible.builtin.debug:
+        msg: "Security group: {{ _sg.group_id }} ({{ ec2_sg_name }})"
+      tags: [ec2, provision]
+
+    # ── Default VPC subnet (public IP requires subnet; amazon.aws 8.x deprecates `network:`) ──
+    - name: Discover default VPC
+      amazon.aws.ec2_vpc_net_info:
+        region:  "{{ aws_region }}"
+        filters:
+          is-default: "true"
+      register: _default_vpc
+      tags: [ec2, provision]
+
+    - name: Assert default VPC exists
+      ansible.builtin.assert:
+        that: _default_vpc.vpcs | default([]) | length > 0
+        fail_msg: >-
+          No default VPC in {{ aws_region }}. In AWS Console: EC2 → VPCs → Create default VPC,
+          or use an account/region that has one.
+      tags: [ec2, provision]
+
+    - name: List subnets in default VPC
+      amazon.aws.ec2_vpc_subnet_info:
+        region:  "{{ aws_region }}"
+        filters:
+          vpc-id: "{{ (_default_vpc.vpcs | first).vpc_id }}"
+      register: _default_subnets
+      tags: [ec2, provision]
+
+    - name: Assert default VPC has subnets
+      ansible.builtin.assert:
+        that: _default_subnets.subnets | default([]) | length > 0
+        fail_msg: "Default VPC in {{ aws_region }} has no subnets — add a subnet or recreate the default VPC."
+      tags: [ec2, provision]
+
+    - name: Set subnet for new instances (deterministic pick)
+      ansible.builtin.set_fact:
+        ec2_subnet_id: "{{ (_default_subnets.subnets | sort(attribute='subnet_id') | first).subnet_id }}"
+      tags: [ec2, provision]
+
+    # ── Duplicate guard (two instances, same Number tag => broken .env / inventory) ──
+    - name: List existing ansible-lab instances (non-terminated)
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ ec2_project_tag }}"
+          instance-state-name:
+            - pending
+            - running
+            - stopping
+            - stopped
+      register: _lab_existing
+      tags: [ec2, provision]
+
+    - name: Group instance IDs by Number tag
+      ansible.builtin.set_fact:
+        _ids_by_number: "{{ _ids_by_number | default({}) | combine({ num_key: (_ids_by_number[num_key] | default([])) + [item.instance_id] }) }}"
+      loop: "{{ _lab_existing.instances | selectattr('tags.Number', 'defined') | list }}"
+      vars:
+        num_key: "{{ item.tags.Number | string }}"
+      loop_control:
+        label: "{{ item.instance_id }}"
+      tags: [ec2, provision]
+
+    - name: Fail when more than one instance shares the same lab slot (Number tag)
+      ansible.builtin.fail:
+        msg: >-
+          Lab slot Number={{ item.key }} has {{ item.value | length }} instances ({{ item.value | join(', ') }}).
+          In EC2 console terminate the extra(s) so only one remains per slot, or:
+          bash scripts/run_ec2_terminate.sh && bash scripts/run_ec2_provision.sh
+      loop: "{{ _ids_by_number | default({}) | dict2items }}"
+      when: item.value | length > 1
+      tags: [ec2, provision]
+
+    # ── Launch / ensure running (filters = Project + Number + non-terminated states)
+    # Without this, the module often matches only *running* instances; a stopped VM is
+    # ignored and a second launch creates another instance with the same Name tag.
+    - name: Launch EC2 instance {{ item }}
+      amazon.aws.ec2_instance:
+        name:           "{{ ec2_project_tag }}-{{ '%02d' | format(item) }}"
+        region:         "{{ aws_region }}"
+        instance_type:  "{{ ec2_instance_type }}"
+        image_id:       "{{ ec2_ami_id }}"
+        key_name:       "{{ ec2_key_pair }}"
+        vpc_subnet_id:  "{{ ec2_subnet_id }}"
+        security_groups: ["{{ ec2_sg_name }}"]
+        network_interfaces:
+          - assign_public_ip: true
+        volumes:
+          - device_name: /dev/xvda
+            ebs:
+              volume_size:            8
+              volume_type:            gp2
+              delete_on_termination:  true
+        tags:
+          Project:   "{{ ec2_project_tag }}"
+          ManagedBy: ansible
+          Number:    "{{ item }}"
+        filters:
+          "tag:Project": "{{ ec2_project_tag }}"
+          "tag:Number": "{{ item | string }}"
+          instance-state-name:
+            - pending
+            - running
+            - stopping
+            - stopped
+        wait:  true
+        state: running
+      loop: "{{ range(1, ec2_instance_count | int + 1) | list }}"
+      loop_control:
+        label: "{{ ec2_project_tag }}-{{ '%02d' | format(item) }}"
+      register: _launched
+      tags: [ec2, provision]
+
+    # ── Wait for SSH ───────────────────────────────────────────────────────────
+    - name: Wait for SSH port 22 on instance {{ item.item }}
+      ansible.builtin.wait_for:
+        host:    "{{ item.instances[0].public_ip_address }}"
+        port:    22
+        timeout: 180
+        delay:   10
+      loop: "{{ _launched.results }}"
+      loop_control:
+        label: "{{ item.instances[0].public_ip_address }}"
+      when:
+        - not (item.failed | default(false) | bool)
+        - item.instances is defined
+        - item.instances | length > 0
+        - item.instances[0].public_ip_address is defined
+        - (item.instances[0].public_ip_address | string | length) > 0
+      tags: [ec2, provision]
+
+    # ── Update .env ────────────────────────────────────────────────────────────
+    - name: Update .env — {{ ec2_name_map[item.item | int].env_var }}
+      ansible.builtin.lineinfile:
+        path:   "{{ playbook_dir }}/../.env"
+        regexp: "^{{ ec2_name_map[item.item | int].env_var }}="
+        line:   "{{ ec2_name_map[item.item | int].env_var }}={{ item.instances[0].public_ip_address }}"
+        state:  present
+      loop: "{{ _launched.results }}"
+      loop_control:
+        label: "{{ ec2_name_map[item.item | int].env_var }}"
+      when:
+        - not (item.failed | default(false) | bool)
+        - item.instances is defined
+        - item.instances | length > 0
+        - item.instances[0].public_ip_address is defined
+      tags: [ec2, provision]
+
+    # ── Re-render inventory ────────────────────────────────────────────────────
+    - name: Re-render inventory/hosts.autogen.yml
+      ansible.builtin.command:
+        cmd:   "bash scripts/render_inventory_from_env.sh"
+        chdir: "{{ playbook_dir }}/.."
+      changed_when: true
+      tags: [ec2, provision]
+
+    # ── Summary ────────────────────────────────────────────────────────────────
+    - name: Provisioning complete — next steps
+      ansible.builtin.debug:
+        msg:
+          - "=============================="
+          - "EC2 INSTANCES PROVISIONED"
+          - "=============================="
+          - "Count  : {{ ec2_instance_count }}"
+          - "Region : {{ aws_region }}"
+          - "Type   : {{ ec2_instance_type }}"
+          - ""
+          - "IPs updated in .env. Run next:"
+          - "  bash scripts/run_site.sh         # configure users + harden"
+          - "  bash scripts/run_audit.sh        # verify everything"
+          - "  bash scripts/run_ec2_status.sh   # see live AWS status"
+          - ""
+          - "COST REMINDER: stop when not in use:"
+          - "  bash scripts/run_ec2_stop.sh"
+      tags: [ec2, provision]

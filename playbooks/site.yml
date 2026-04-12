@@ -1,0 +1,32 @@
+---
+# Master orchestration — runs every play in dependency order (SSH to hosts in group `linux`).
+#
+# Prerequisites: EC2 already provisioned (bash scripts/run_ec2_provision.sh) and .env has EC2_HOST_* for your EC2_INSTANCE_COUNT.
+#
+# Run full suite:   bash scripts/run_site.sh
+# Dry-run preview:  bash scripts/run_site.sh --check --diff
+#
+# Run a targeted subset using tags:
+#   bash scripts/run_site.sh --tags ping          # only connectivity check
+#   bash scripts/run_site.sh --tags users         # only bulk user playbook
+#   bash scripts/run_site.sh --tags identity      # only per-host identity playbook
+#   bash scripts/run_site.sh --tags harden        # only SSH hardening
+#   bash scripts/run_site.sh --tags verify        # only verification tasks
+#
+# Individual playbooks can still be executed independently.
+
+# ── 1 ─ Connectivity gate ─────────────────────────────────────────────────────
+- name: "[1/4] Connectivity health check"
+  ansible.builtin.import_playbook: ping.yml
+
+# ── 2 ─ Bulk users (all hosts, from vars/managed_users.yml) ───────────────────
+- name: "[2/4] Create bulk users (managed_users.yml)"
+  ansible.builtin.import_playbook: create_linux_users.yml
+
+# ── 3 ─ Per-host identity (from inventory/host_vars/*.yml) ────────────────────
+- name: "[3/4] Configure per-host managed identity"
+  ansible.builtin.import_playbook: configure_managed_identity.yml
+
+# ── 4 ─ SSH hardening ─────────────────────────────────────────────────────────
+- name: "[4/4] Harden SSH daemon"
+  ansible.builtin.import_playbook: harden_ssh.yml

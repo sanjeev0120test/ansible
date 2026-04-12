@@ -1,0 +1,24 @@
+---
+# Ensure .ssh directory and authorized_keys have correct ownership + permissions.
+# This is defensive hardening — sshd refuses keys with too-open permissions.
+
+- name: "Ensure .ssh directory is secure for '{{ mu_username }}'"
+  ansible.builtin.file:
+    path:  "/home/{{ mu_username }}/.ssh"
+    state: directory
+    owner: "{{ mu_username }}"
+    group: "{{ mu_username }}"
+    mode:  "0700"
+
+- name: "Check whether authorized_keys exists for '{{ mu_username }}'"
+  ansible.builtin.stat:
+    path: "/home/{{ mu_username }}/.ssh/authorized_keys"
+  register: _ak_stat
+
+- name: "Secure authorized_keys permissions for '{{ mu_username }}'"
+  ansible.builtin.file:
+    path:  "/home/{{ mu_username }}/.ssh/authorized_keys"
+    owner: "{{ mu_username }}"
+    group: "{{ mu_username }}"
+    mode:  "0600"
+  when: _ak_stat.stat.exists

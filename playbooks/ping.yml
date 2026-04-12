@@ -1,0 +1,25 @@
+---
+# Quick connectivity health check (SSH to inventory group `linux`).
+#
+# Run: bash scripts/run_ping.sh
+# Requires: inventory/hosts.autogen.yml with reachable ansible_host values; PEM in .env / ~/.ssh.
+
+- name: Connectivity health check
+  hosts: linux
+  gather_facts: false
+
+  tasks:
+    - name: Ping all hosts (module-level TCP + Python check)
+      ansible.builtin.ping:
+      tags: [ping, always]
+
+    - name: Uptime
+      ansible.builtin.command: uptime
+      register:     _uptime
+      changed_when: false
+      tags: [ping]
+
+    - name: Show uptime
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} ({{ ansible_host }}) — {{ _uptime.stdout | trim }}"
+      tags: [ping]
