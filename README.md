@@ -6,6 +6,12 @@
 | **Work type A** | **`playbooks/ec2_*.yml`** on **`localhost`** → **AWS EC2 API** in **`AWS_DEFAULT_REGION`**. |
 | **Work type B** | Playbooks on inventory group **`linux`** → **SSH** to instances listed in **`inventory/hosts.autogen.yml`**. |
 
+### Lab in AWS (example)
+
+After **`run_ec2_provision.sh`**, you should see your lab instances in the EC2 console (region from **`AWS_DEFAULT_REGION`** in `.env`). Example: two **`t3.micro`** instances named **`ansible-lab-01`** and **`ansible-lab-02`** in **us-east-1**, status checks passed.
+
+![EC2 console: ansible-lab-01 and ansible-lab-02 running as t3.micro in us-east-1](docs/images/ec2-lab-instances.png)
+
 ---
 
 ## Table of Contents
