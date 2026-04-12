@@ -5,7 +5,6 @@
 | **Control node** | **apt-based** Linux (e.g. WSL). Bootstrap: **`scripts/install_dependencies.sh`**. |
 | **Work type A** | **`playbooks/ec2_*.yml`** on **`localhost`** → **AWS EC2 API** in **`AWS_DEFAULT_REGION`**. |
 | **Work type B** | Playbooks on inventory group **`linux`** → **SSH** to instances listed in **`inventory/hosts.autogen.yml`**. |
-| **Secrets / generated files** | Listed in **`.gitignore`** (e.g. `.env`, `hosts.autogen.yml`, `vars/managed_users.yml`, `.keys/`, `reports/*.txt`, `reports/*.html`, `.venv/`). |
 
 ---
 
