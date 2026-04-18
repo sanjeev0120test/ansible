@@ -1,6 +1,8 @@
 # Local secrets — copy from *.example.yml
 vars/managed_users.yml
 *.pem
+# Explicit: EC2 private key filename (also matched by *.pem above)
+key-pair.pem
 *.key
 .keys/
 .vault_pass
